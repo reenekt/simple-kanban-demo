@@ -151,20 +151,4 @@ export default Vue.extend({
 .spacer {
   flex: 1 1 auto;
 }
-
-// copy from original component
-.kanban-board-card {
-  margin: 2px;
-  padding: 7px;
-  border: 1px solid #474747;
-
-  &--ghost {
-    border: 1px dashed #b10000;
-  }
-  &--ghost-drop {
-    border: 1px dashed #0041b1;
-    min-width: 50px;
-    min-height: 50px;
-  }
-}
 </style>

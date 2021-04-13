@@ -7,7 +7,7 @@
       :drop-placeholder="upperDropPlaceholderOptions"
     >
       <Draggable
-        v-for="(column, columnIndex) in columns"
+        v-for="({ column, items }, columnIndex) in board"
         :key="column[columnKey] || `unknown-column-${columnIndex}`"
       >
         <div class="kanban-board-column">
@@ -26,9 +26,6 @@
           </slot>
           <Container
             group-name="col"
-            @drag-start="onCardDragStart(column, $event)"
-            @drag-end="onCardDragEnd(column, $event)"
-            @drop-ready="onCardDropReady(column, $event)"
             @drop="onCardDrop(column, $event)"
             :get-child-payload="getCardPayload(column)"
             drag-class="kanban-board-card--ghost"
@@ -36,10 +33,16 @@
             :drop-placeholder="dropPlaceholderOptions"
           >
             <Draggable
-              v-for="(card, cardIndex) in getItemsByColumn(column)"
+              v-for="(card, cardIndex) in items"
               :key="card.id || `column-${columnIndex}-card-${cardIndex}`"
             >
-              <slot name="card" :card="card" :column="column" :columnKey="columnKey" :itemsOrderKey="itemsOrderKey">
+              <slot
+                name="card"
+                :card="card"
+                :column="column"
+                :columnKey="columnKey"
+                :itemsOrderKey="itemsOrderKey"
+              >
                 <div class="kanban-board-card">
                   <p>
                     {{ card.text }} | col: {{ column[columnKey] }} | order:
@@ -59,22 +62,6 @@
 import Vue, { PropType } from "vue";
 import { Container, Draggable } from "vue-smooth-dnd";
 
-function groupBy<T = any>(
-  arr: T[],
-  groupByKey: string,
-  withKeys = false
-): Array<T[]> | Record<string, T[]> {
-  const groups: Record<string, T[]> = {};
-  arr.forEach((item) => {
-    groups[item[groupByKey]] = groups[item[groupByKey]] || [];
-    groups[item[groupByKey]].push(item);
-  });
-  if (withKeys) {
-    return groups;
-  }
-  return Object.values(groups);
-}
-
 const applyDrag = (arr: any, dragResult: any) => {
   const { removedIndex, addedIndex, payload } = dragResult;
   if (removedIndex === null && addedIndex === null) return arr;
@@ -92,6 +79,13 @@ const applyDrag = (arr: any, dragResult: any) => {
 
   return result;
 };
+
+export type KanbanBoardColumnDataStructure = {
+  column: Record<string, unknown>;
+  items: Record<string, unknown>[];
+};
+
+export type KanbanBoardDataStructure = KanbanBoardColumnDataStructure[];
 
 export default Vue.extend({
   name: "KanbanBoard",
@@ -132,150 +126,92 @@ export default Vue.extend({
   },
   data() {
     return {
-      draggingItemCurrentColumnId: null,
+      board: [] as KanbanBoardDataStructure,
       upperDropPlaceholderOptions: {
-        className: "kanban-board-container-preview",
+        className: "kanban-board-column-preview",
         animationDuration: "150",
         showOnTop: true,
       },
       dropPlaceholderOptions: {
-        className: "kanban-board-cards-container-preview",
+        className: "kanban-board-card-preview",
         animationDuration: "150",
         showOnTop: true,
+      },
+      cardMoveEventData: {
+        payload: null as Record<string, unknown> | null,
+        from: null as KanbanBoardColumnDataStructure | null,
+        to: null as KanbanBoardColumnDataStructure | null,
+        removedIndex: null as number | null,
+        addedIndex: null as number | null,
       },
     };
   },
   created() {
     // this.prepareItemsOrders();
+    this.prepareBoardData();
+  },
+  watch: {
+    cardMoveEventData: {
+      handler(val, oldVal) {
+        if (val.from !== null && val.to !== null) {
+          this.dispatchCardMoveEvent();
+        }
+      },
+      deep: true,
+    },
   },
   methods: {
     // TODO
     onColumnDrop(dropResult: any): void {
-      const columns = applyDrag(this.columns, dropResult);
-      this.$emit("update:columns", columns);
+      // const columns = applyDrag(this.columns, dropResult);
+      // this.$emit("update:columns", columns);
+
+      this.board = applyDrag(this.board, dropResult);
     },
-    onCardDropReady(column: any, dropResult: any) {
-      const { removedIndex, addedIndex, payload } = dropResult;
-      // console.log('onCardDropReady', column[this.columnKey], removedIndex, addedIndex, payload, payload[this.itemsColumnKey]);
-    },
-    onCardDragStart(column: any, dragResult: any) {
-      const { isSource, payload, willAcceptDrop } = dragResult;
-      // console.log('onCardDragStart', isSource, payload, willAcceptDrop, payload[this.itemsColumnKey]);
-      if (isSource) {
-        this.draggingItemCurrentColumnId = payload[this.itemsColumnKey]
-      }
-    },
-    onCardDragEnd(column: any, dragResult: any) {
-      const { isSource, payload, willAcceptDrop } = dragResult
-      // console.log('onCardDragEnd', isSource, payload, willAcceptDrop, payload[this.itemsColumnKey]);
-      // if (isSource) {
-      //   this.draggingItemCurrentColumnId = null
-      // }
-    },
+
     onCardDrop(column: any, dropResult: any): void {
-      const { removedIndex, addedIndex, payload: item, element } = dropResult;
-      const previousColumnId = this.draggingItemCurrentColumnId;
-      const currentColumnId = item[this.itemsColumnKey];
-      // this.draggingItemCurrentColumnId = null;
-      // there's problem with indexes - item removed earlier than removeIndex calculates and removeIndex is grater than real by 1
-      const isDroppedToLeftSide = previousColumnId as any > currentColumnId;
-      console.log('isDroppedToLeftSide', isDroppedToLeftSide, previousColumnId, currentColumnId);
-      // this.draggingItemCurrentColumnId = null;
-
-      if (
-        (removedIndex !== null || addedIndex !== null) &&
-        removedIndex !== addedIndex
-      ) {
-        const itemsInColumn = this.getItemsByColumn(column);
-
-        const varyItemsOrderKey = (
-          items: any[],
-          mode: "increment" | "decrement" = "increment"
-        ) => {
-          const modeSign = mode === "increment" ? 1 : -1;
-          items.forEach((item) => {
-            if (!isNaN(item[this.itemsOrderKey])) {
-              item[this.itemsOrderKey] += 1 * modeSign;
-            } else if (/.+\d+$/.test(item[this.itemsOrderKey])) {
-              const oldNumberString = item[this.itemsOrderKey].match(
-                /.+(\d+)$/
-              )[1];
-              let number = +oldNumberString;
-              number += 1 * modeSign;
-              item[this.itemsOrderKey].replace(oldNumberString, "" + number);
-            } else {
-              console.error(
-                "item's order key has no any number. Allowed number and string with numbers at the end (e.g. ord3)."
-              );
-            }
-          });
-        };
-
-        const decrementItemsOrderKey = (items: any[]) => {
-          varyItemsOrderKey(items, "decrement");
-        };
-
-        const incrementItemsOrderKey = (items: any[]) => {
-          varyItemsOrderKey(items, "increment");
-        };
-
-        if (removedIndex !== null && addedIndex === null) {
-          const needleStartIndex = isDroppedToLeftSide
-            ? removedIndex
-            : removedIndex + 1;
-          const itemsAfterRemovedIndex = itemsInColumn.slice(needleStartIndex);
-
-          decrementItemsOrderKey(itemsAfterRemovedIndex);
-
-          // console.log(
-          //   "removed",
-          //   item[this.itemsColumnKey],
-          //   column[this.columnKey],
-          //   itemsAfterRemovedIndex,
-          //   removedIndex,
-          //   itemsInColumn
-          // );
+      if (dropResult.removedIndex !== null || dropResult.addedIndex !== null) {
+        const board = [...this.board];
+        const columnDataIndex = board.findIndex((value) => {
+          return value.column[this.columnKey] === column[this.columnKey];
+        });
+        if (columnDataIndex === -1) {
+          return;
         }
+        const columnData = board[columnDataIndex];
 
-        if (addedIndex !== null && removedIndex === null) {
-          const itemsAfterAddedIndex = itemsInColumn.slice(addedIndex);
+        const newColumnData = Object.assign({}, columnData);
+        newColumnData.items = applyDrag(newColumnData.items, dropResult);
+        this.reorderItemsInList(newColumnData.items);
+        board.splice(columnDataIndex, 1, newColumnData);
+        this.board = board;
 
-          incrementItemsOrderKey(itemsAfterAddedIndex);
-
-          // console.log(
-          //   "added",
-          //   item[this.itemsColumnKey],
-          //   column[this.columnKey],
-          //   itemsAfterAddedIndex,
-          //   addedIndex,
-          //   itemsInColumn
-          // );
+        // For (single) event dispatching
+        this.cardMoveEventData.payload = dropResult.payload;
+        if (dropResult.removedIndex !== null) {
+          this.cardMoveEventData.from = newColumnData;
+          this.cardMoveEventData.removedIndex = dropResult.removedIndex;
         }
-
-        // const result = [...arr];
-        // let itemToAdd = payload;
-        //
-        // if (removedIndex !== null) {
-        //   itemToAdd = result.splice(removedIndex, 1)[0];
-        // }
-        //
-        // if (addedIndex !== null) {
-        //   result.splice(addedIndex, 0, itemToAdd);
-        // }
-        //
-        // return result;
-      }
-
-      /// Change column of item if needed
-      if (addedIndex !== null) {
-        item[this.itemsColumnKey] = column[this.columnKey];
+        if (dropResult.addedIndex !== null) {
+          this.cardMoveEventData.to = newColumnData;
+          this.cardMoveEventData.addedIndex = dropResult.addedIndex;
+        }
       }
     },
+
     getCardPayload(
       column: Record<string, unknown>
-    ): (index: number) => Record<string, unknown> {
+    ): (index: number) => Record<string, unknown> | undefined {
       return (index: number) => {
-        return this.getItemsByColumn(column)[index];
+        // return this.getItemsByColumn(column)[index];
+        const needleBoardDataItem = this.board.find((value) => {
+          // return value.column[this.columnKey] === column[this.columnKey];
+          return value.column === column; // TODO test / use line above if test fails
+        });
+        if (needleBoardDataItem === undefined) {
+          return undefined;
+        }
+        return needleBoardDataItem.items[index];
       };
     },
 
@@ -287,67 +223,57 @@ export default Vue.extend({
           return item[this.itemsColumnKey] === column[this.columnKey];
         })
         .sort((a, b) => {
-          if (
-            (a[this.itemsOrderKey] as number | string) <
-            (b[this.itemsOrderKey] as number | string)
-          ) {
+          if (+a[this.itemsOrderKey] < +b[this.itemsOrderKey]) {
             return -1;
           }
-          if (
-            (a[this.itemsOrderKey] as number | string) >
-            (b[this.itemsOrderKey] as number | string)
-          ) {
+          if (+a[this.itemsOrderKey] > +b[this.itemsOrderKey]) {
             return 1;
           }
           return 0;
         });
     },
 
-    // prepareItemsOrders(): void {
-    //   this.items.forEach((item) => {
-    //     if (!(this.itemsOrderKey in item)) {
-    //       item[this.itemsOrderKey] = 1;
-    //     }
-    //   });
-    //
-    //   const itemsGroupedByColumn = groupBy(
-    //     this.items,
-    //     this.itemsColumnKey
-    //   ) as any[][];
-    //   itemsGroupedByColumn.forEach((itemsByColumn) => {
-    //     const itemsGroupedBySameOrder = groupBy(
-    //       itemsByColumn,
-    //       this.itemsOrderKey
-    //     );
-    //
-    //     // count of previous same values - 1 -- how much need to increase values of next (current) group
-    //     let additionalAddendum = 0;
-    //
-    //     itemsGroupedBySameOrder.forEach((itemsWithSameOrder) => {
-    //       additionalAddendum = itemsWithSameOrder.length - 1;
-    //
-    //       itemsWithSameOrder.forEach((item, itemIndex) => {
-    //         // var++ is not safe for string values, but var += 1 is safe
-    //         item[this.itemsOrderKey] += additionalAddendum + itemIndex;
-    //       });
-    //     });
-    //
-    //     additionalAddendum = 0; // todo
+    // TODO
+    // reorderColumns() {
+    //   this.board.forEach((columnData, columnDataIndex) => {
+    //     columnData.column[this.columnsOrderKey] = columnDataIndex + 1;
     //   });
     // },
+
+    reorderItemsInList(itemsList: Record<string, unknown>[]) {
+      itemsList.forEach((item, itemIndex) => {
+        item[this.itemsOrderKey] = itemIndex + 1;
+      });
+    },
+
+    prepareBoardData(): void {
+      const boardData: KanbanBoardDataStructure = [];
+      this.columns.forEach((column) => {
+        const itemsByColumn = this.getItemsByColumn(column);
+        this.reorderItemsInList(itemsByColumn);
+        const columnData: KanbanBoardColumnDataStructure = {
+          column,
+          items: itemsByColumn,
+        };
+        boardData.push(columnData);
+      });
+      this.board = boardData;
+    },
+
+    dispatchCardMoveEvent() {
+      this.$emit("card:moved", this.cardMoveEventData);
+      this.cardMoveEventData.from = null;
+      this.cardMoveEventData.to = null;
+      this.cardMoveEventData.payload = null;
+      this.cardMoveEventData.removedIndex = null;
+      this.cardMoveEventData.addedIndex = null;
+    },
   },
 });
 </script>
 
 <!-- Add "scoped" attribute to limit CSS to this component only -->
-<style scoped lang="scss">
-.kanban-board-container-preview {
-  background: red;
-}
-.kanban-board-cards-container-preview {
-  background: blue;
-}
-
+<style lang="scss">
 .kanban-board {
   //
 }
@@ -377,12 +303,12 @@ export default Vue.extend({
   }
 }
 
-.kanban-board-container-preview {
-  background: #b10000;
-  border: 1px solid #b10000;
+.kanban-board-column-preview {
+  background: rgba(245, 184, 184, 0.15);
+  border: 1px dashed rgba(245, 184, 184, 0.7);
 }
-.kanban-board-cards-container-preview {
-  background: #0041b1;
-  border: 1px solid #0041b1;
+.kanban-board-card-preview {
+  background: rgba(184, 201, 245, 0.15);
+  border: 1px dashed rgb(184, 201, 245);
 }
 </style>

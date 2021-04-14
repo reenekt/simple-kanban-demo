@@ -151,6 +151,11 @@ export default Vue.extend({
     this.prepareBoardData();
   },
   watch: {
+    items: {
+      handler(val, oldVal) {
+        this.onItemsListChange(val, oldVal);
+      },
+    },
     cardMoveEventData: {
       handler(val, oldVal) {
         if (val.from !== null && val.to !== null) {
@@ -182,9 +187,11 @@ export default Vue.extend({
 
         const newColumnData = Object.assign({}, columnData);
         newColumnData.items = applyDrag(newColumnData.items, dropResult);
+        this.updateColumnKeyInColumnDataItems(newColumnData);
         this.reorderItemsInList(newColumnData.items);
         board.splice(columnDataIndex, 1, newColumnData);
         this.board = board;
+        this.updateItemsAndDispatchEvent();
 
         // For (single) event dispatching
         this.cardMoveEventData.payload = dropResult.payload;
@@ -240,6 +247,11 @@ export default Vue.extend({
     //   });
     // },
 
+    updateColumnKeyInColumnDataItems(columnData: KanbanBoardColumnDataStructure) {
+      columnData.items.forEach((item) => {
+        item[this.itemsColumnKey] = columnData.column[this.columnKey];
+      });
+    },
     reorderItemsInList(itemsList: Record<string, unknown>[]) {
       itemsList.forEach((item, itemIndex) => {
         item[this.itemsOrderKey] = itemIndex + 1;
@@ -267,6 +279,67 @@ export default Vue.extend({
       this.cardMoveEventData.payload = null;
       this.cardMoveEventData.removedIndex = null;
       this.cardMoveEventData.addedIndex = null;
+    },
+
+    onItemsListChange(
+      newItemsList: Record<string, unknown>[],
+      oldItemsList: Record<string, unknown>[]
+    ) {
+      const removedItems: Record<string, unknown>[] = [];
+      const addedItems: Record<string, unknown>[] = [];
+
+      // get all removed items
+      oldItemsList.forEach((item) => {
+        // if (!(item in newItemsList)) {
+        if (!newItemsList.includes(item)) {
+          removedItems.push(item);
+        }
+      });
+
+      // get all added items
+      newItemsList.forEach((item) => {
+        // if (!(item in oldItemsList)) {
+        if (!oldItemsList.includes(item)) {
+          addedItems.push(item);
+        }
+      });
+
+      // remove items from board data
+      removedItems.forEach((item) => {
+        const needleColumnData = this.board.find((columnData) => {
+          // return item in columnData.items;
+          return columnData.items.includes(item);
+        });
+        if (needleColumnData !== undefined) {
+          const needleColumnDataItemIndex = needleColumnData.items.indexOf(
+            item
+          );
+          needleColumnData.items.splice(needleColumnDataItemIndex, 1);
+          this.reorderItemsInList(needleColumnData.items);
+        }
+      });
+
+      // add items to needle columns in board data
+      addedItems.forEach((item) => {
+        const needleColumnData = this.board.find((columnData) => {
+          return (
+            columnData.column[this.columnKey] === item[this.itemsColumnKey]
+          );
+        });
+        if (needleColumnData !== undefined) {
+          needleColumnData.items.push(item);
+          this.reorderItemsInList(needleColumnData.items);
+        }
+      });
+    },
+
+    updateItemsAndDispatchEvent() {
+      const items: Record<string, unknown> = this.board
+        .map((columnData) => columnData.items)
+        .reduce((previousValue, currentValue) => {
+          return previousValue.concat(currentValue);
+        }, []);
+      this.$emit('update:items', items)
     },
   },
 });

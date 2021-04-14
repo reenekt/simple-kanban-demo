@@ -7,9 +7,17 @@
       </label>
     </div>
 
+    <div>
+      <button @click="addNewCard">Add new card</button>
+      <button @click="removeFirstColCard">
+        Remove first column's first card
+      </button>
+    </div>
+
     <kanban-board
+      ref="kanbanDemo"
       :columns.sync="columns"
-      :items="items"
+      :items.sync="items"
       column-key="id"
       column-title-key="title"
       items-column-key="status_id"
@@ -31,6 +39,7 @@
             {{ card.text }} | col: {{ column[columnKey] }} | order:
             {{ card[itemsOrderKey] }}
           </p>
+          <div>{{ card.status_id }}</div>
 
           <div
             v-if="enableGifs"
@@ -39,6 +48,7 @@
               height: 0;
               padding-bottom: 81%;
               position: relative;
+              pointer-events: none;
             "
           >
             <iframe
@@ -60,17 +70,30 @@
       </template>
     </kanban-board>
     <hr />
-    <div>columns</div>
-    <pre>{{ columns }}</pre>
-    <hr />
-    <div>items</div>
-    <pre>{{ items }}</pre>
+    <div class="d-flex">
+      <div>
+        <div>columns</div>
+        <pre>{{ columns }}</pre>
+      </div>
+      <div>
+        <div>items</div>
+        <pre>{{ items }}</pre>
+      </div>
+      <div>
+        <div>$refs.kanbanDemo.board</div>
+        <pre>
+          {{ $refs.kanbanDemo ? $refs.kanbanDemo.board : 'Undefined' }}
+        </pre>
+      </div>
+    </div>
   </div>
 </template>
 
 <script lang="ts">
 import Vue from "vue";
 import KanbanBoard from "@/components/KanbanBoard.vue";
+
+type cardItem = { id: number; status_id: number; text: string; order?: number };
 
 export default Vue.extend({
   name: "App",
@@ -129,8 +152,34 @@ export default Vue.extend({
           text: "5",
           order: 1,
         },
-      ],
+      ] as cardItem[],
     };
+  },
+  methods: {
+    addNewCard() {
+      const card = {
+        id: 45,
+        status_id: 1,
+        text: "45",
+        // order: 1,
+      };
+      // this.items.push(card); // WILL NOT WORK
+      const items = [...this.items];
+      items.push(card);
+      this.items = items;
+    },
+    removeFirstColCard() {
+      const items = [...this.items];
+      const needleItem = this.items
+        .filter((item) => item.status_id === 1)
+        .sort((a, b) => {
+          return a.order - b.order;
+        })[0];
+      const needleIndex = this.items.indexOf(needleItem);
+      debugger
+      items.splice(needleIndex, 1);
+      this.items = items;
+    },
   },
 });
 </script>
